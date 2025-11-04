@@ -143,9 +143,8 @@ if uploaded_files:
                 tab1, tab2 = st.tabs(["空间分布", "统计信息"])
                 with tab1:
                     st.subheader("第一期栅格预览")
-                    fig = plot_map(data_stack.isel(time=0),
-                                   title=f"年份 {data_stack.time.values[0]}",
-                                   return_fig=True)
+                    plot_map(data_stack.isel(time=0),
+                             title=f"年份 {data_stack.time.values[0]}")
                 with tab2:
                     st.write("数据统计:")
                     stats_data = {

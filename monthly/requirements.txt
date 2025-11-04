@@ -1,0 +1,12 @@
+streamlit
+xarray
+rioxarray
+rasterio
+numpy
+scipy
+statsmodels
+pandas
+matplotlib
+dask
+numba
+tqdm

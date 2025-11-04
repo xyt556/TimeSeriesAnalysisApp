@@ -423,18 +423,35 @@ if uploaded_files:
 
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            plot_map(trend_da.mean("time"), title="STL: 平均趋势分量")
+                            # 注意：trend_da 已经是平均值，不需要再调用 .mean("time")
+                            plot_map(trend_da, title="STL: 平均趋势分量")
                             st.download_button(
                                 "⬇️ 下载趋势分量",
-                                data=dataarray_to_bytes_tif(trend_da.mean("time")),
+                                data=dataarray_to_bytes_tif(trend_da),
                                 file_name="stl_trend_mean.tif",
                                 mime="image/tiff",
                                 use_container_width=True
                             )
                         with col2:
-                            plot_map(seasonal_da.mean("time"), title="STL: 平均季节分量")
+                            # seasonal_da 也已经是平均值
+                            plot_map(seasonal_da, title="STL: 平均季节分量")
+                            st.download_button(
+                                "⬇️ 下载季节分量",
+                                data=dataarray_to_bytes_tif(seasonal_da),
+                                file_name="stl_seasonal_mean.tif",
+                                mime="image/tiff",
+                                use_container_width=True
+                            )
                         with col3:
-                            plot_map(resid_da.std("time"), title="STL: 残差标准差")
+                            # resid_da 已经是标准差
+                            plot_map(resid_da, title="STL: 残差标准差")
+                            st.download_button(
+                                "⬇️ 下载残差标准差",
+                                data=dataarray_to_bytes_tif(resid_da),
+                                file_name="stl_residual_std.tif",
+                                mime="image/tiff",
+                                use_container_width=True
+                            )
 
             # ---------------------------
             # 交互式像元分析

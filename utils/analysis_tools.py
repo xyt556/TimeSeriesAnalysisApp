@@ -243,13 +243,17 @@ def fft_analysis(stack: xr.DataArray):
 
 
 # ---------------- STL (简化版) ----------------
+# utils/analysis_tools.py 中的 STL 函数部分
+
 def stl_decompose_pixelwise(stack: xr.DataArray, period=12):
     """
-    STL分解（简化版，避免内存问题）
+    STL分解 - 修复版本
+    返回的已经是统计量，不需要再计算均值
     """
     data = stack.values
     n, ny, nx = data.shape
-    # 只计算均值结果，避免存储整个时间序列
+
+    # 预分配结果数组 - 已经是二维的统计量
     trend_mean = np.full((ny, nx), np.nan, dtype=np.float32)
     seasonal_mean = np.full((ny, nx), np.nan, dtype=np.float32)
     resid_std = np.full((ny, nx), np.nan, dtype=np.float32)
@@ -270,11 +274,14 @@ def stl_decompose_pixelwise(stack: xr.DataArray, period=12):
                 stl = STL(ts_filled, period=period, robust=True)
                 res = stl.fit()
 
+                # 直接计算统计量
                 trend_mean[i, j] = np.mean(res.trend)
                 seasonal_mean[i, j] = np.mean(res.seasonal)
                 resid_std[i, j] = np.std(res.resid)
 
-            except Exception:
+            except Exception as e:
+                # 打印调试信息
+                print(f"STL分解失败在像元 ({i}, {j}): {e}")
                 continue
 
     coords = {"y": stack.y, "x": stack.x}

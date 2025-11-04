@@ -129,7 +129,7 @@ def extract_time(filename):
     返回 datetime 对象
     """
     # 尝试匹配 YYYY_DDD 格式 (2020_001, 2020_365)
-    m = re.search(r'(19|20)\d{2}_(\d{3})', filename)
+    m = re.search(r'(19\d{2}|20\d{2})_(\d{3})', filename)
     if m:
         year = int(m.group(1))
         day_of_year = int(m.group(2))
@@ -141,22 +141,21 @@ def extract_time(filename):
             return datetime.datetime(year, 1, 1)
 
     # 尝试匹配 YYYY_MM 格式 (2020_01, 2020_12)
-    m = re.search(r'(19|20)\d{2}_(\d{2})', filename)
+    m = re.search(r'(19\d{2}|20\d{2})_(\d{1,2})', filename)
     if m:
         year = int(m.group(1))
         month = int(m.group(2))
         return datetime.datetime(year, month, 1)
 
     # 尝试匹配 YYYYMM 格式 (202001, 202012)
-    m = re.search(r'(19|20)\d{4}', filename)
+    m = re.search(r'(19\d{2}|20\d{2})(\d{2})', filename)
     if m:
-        time_str = m.group(0)
-        year = int(time_str[:4])
-        month = int(time_str[4:6])
+        year = int(m.group(1))
+        month = int(m.group(2))
         return datetime.datetime(year, month, 1)
 
     # 尝试匹配 YYYY 格式 (2000, 2001)
-    m = re.search(r'(19|20)\d{2}', filename)
+    m = re.search(r'(19\d{2}|20\d{2})', filename)
     if m:
         year = int(m.group(0))
         return datetime.datetime(year, 1, 1)  # 年度数据默认设为1月1日
@@ -169,13 +168,126 @@ def extract_time(filename):
 
     for month_name, month_num in month_map.items():
         if month_name in filename:
-            m = re.search(r'(19|20)\d{2}', filename)
+            m = re.search(r'(19\d{2}|20\d{2})', filename)
             if m:
                 year = int(m.group(0))
                 return datetime.datetime(year, month_num, 1)
 
     return None
 
+
+@st.cache_data(show_spinner=False)
+def load_and_stack_files(_uploaded_files):
+    """加载并堆叠文件 - 修复时间坐标问题"""
+    tmpdir = Path(tempfile.mkdtemp())
+    paths = []
+
+    for f in _uploaded_files:
+        p = tmpdir / f.name
+        p.write_bytes(f.getbuffer())
+        paths.append(p)
+
+    # 提取时间信息
+    times = [extract_time(f.name) for f in _uploaded_files]
+
+    # 显示文件名和时间提取结果用于调试
+    st.info("文件名和时间提取结果:")
+    for f, t in zip(_uploaded_files, times):
+        if t:
+            st.write(f"- {f.name} -> {t}")
+        else:
+            st.write(f"- {f.name} -> 无法提取时间")
+
+    # 检查时间提取
+    invalid_files = [(f.name, t) for f, t in zip(_uploaded_files, times) if t is None]
+    if invalid_files:
+        st.error("以下文件中未检测到有效时间信息:")
+        for fname, time_val in invalid_files:
+            st.error(f"  - {fname}")
+        st.info("💡 支持的文件名格式:")
+        st.info("   - 年度数据: NDVI_2000.tif, NDVI_2001_徐州.tif")
+        st.info("   - 月度数据: NDVI_200001.tif, NDVI_2000_01.tif, NDVI_2000_01_徐州.tif")
+        st.info("   - 日度数据: NDVI_2000_001.tif, NDVI_2000_365_徐州.tif")
+        return None
+
+    # 按时间排序并检查重复
+    sorted_indices = sorted(range(len(times)), key=lambda i: times[i])
+    paths = [paths[i] for i in sorted_indices]
+    times = [times[i] for i in sorted_indices]
+    _uploaded_files = [_uploaded_files[i] for i in sorted_indices]
+
+    # 检查时间重复并显示详细信息
+    time_count = {}
+    duplicate_files = {}
+    for f, t in zip(_uploaded_files, times):
+        if t not in time_count:
+            time_count[t] = []
+        time_count[t].append(f.name)
+
+    duplicate_times = [t for t, files in time_count.items() if len(files) > 1]
+
+    if duplicate_times:
+        st.warning("⚠️ 检测到重复的时间点:")
+        for t in duplicate_times:
+            st.error(f"时间 {t.strftime('%Y-%m-%d')} 对应的文件:")
+            for fname in time_count[t]:
+                st.error(f"  - {fname}")
+        st.info("时序分析要求每个时间点只有一个观测值，请检查文件命名。")
+
+        # 询问用户是否继续
+        continue_anyway = st.checkbox("忽略重复时间点，继续分析", value=False)
+        if not continue_anyway:
+            return None
+
+    # 读取数据
+    data_list = []
+    time_coords = []
+    for p, t in zip(paths, times):
+        try:
+            da = rxr.open_rasterio(str(p), chunks={'x': 512, 'y': 512}).squeeze()
+            if "band" in da.dims:
+                da = da.isel(band=0).drop_vars('band')
+
+            # 确保数据是2D的 (y, x)
+            if da.ndim != 2:
+                st.error(f"文件 {p.name} 的维度不正确，期望2D数据 (y, x)，实际维度: {da.dims}")
+                continue
+
+            data_list.append(da)
+            time_coords.append(t)
+
+        except Exception as e:
+            st.error(f"读取文件 {p.name} 时出错: {e}")
+            continue
+
+    if not data_list:
+        st.error("没有成功读取任何文件")
+        return None
+
+    # 堆叠数据
+    try:
+        # 使用concat而不是expand_dims，确保时间维度正确
+        stack = xr.concat(data_list, dim="time")
+        stack = stack.assign_coords(time=time_coords)
+        stack = stack.transpose('time', 'y', 'x')
+
+        # 验证数据形状
+        st.info(f"数据栈形状: {stack.shape} (时间, Y, X)")
+
+        # 显示时间坐标信息
+        time_info = []
+        for t in stack.time.values:
+            if isinstance(t, np.datetime64):
+                time_info.append(np.datetime_as_string(t, unit='D'))
+            else:
+                time_info.append(str(t))
+        st.info(f"时间坐标: {time_info}")
+
+        return stack
+
+    except Exception as e:
+        st.error(f"数据堆叠失败: {e}")
+        return None
 
 @st.cache_data(show_spinner=False)
 def load_and_stack_files(_uploaded_files):

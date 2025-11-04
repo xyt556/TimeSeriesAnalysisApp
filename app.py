@@ -109,12 +109,12 @@ CHINESE_SUPPORT, SELECTED_FONT = configure_chinese_fonts()
 
 # 页面配置
 st.set_page_config(
-    page_title="时序遥感五模块分析系统",
+    page_title="时序遥感分析系统",
     layout="wide",
     page_icon="🛰️"
 )
 
-st.title("🛰️ 时序遥感时序栅格分析系统")
+st.title("🛰️ 时序遥感分析系统--@3S&ML")
 st.markdown("""
 **功能模块：** Theil–Sen趋势分析 | Mann–Kendall检验 | BFAST突变检测 | FFT周期分析 | STL分解
 """)

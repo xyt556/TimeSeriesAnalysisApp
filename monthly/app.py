@@ -38,7 +38,7 @@ st.set_page_config(
     page_icon="🛰️"
 )
 
-st.title("🛰️ 时序遥感分析系统")
+st.title("🛰️ 时序遥感分析系统_V2.0 @3S&ML")
 st.markdown("""
 **功能模块：** Theil–Sen趋势分析 | Mann–Kendall检验 | BFAST突变检测 | FFT周期分析 | STL分解
 """)

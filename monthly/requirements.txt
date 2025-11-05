@@ -11,4 +11,3 @@ dask
 numba
 tqdm
 datatime
-pandas

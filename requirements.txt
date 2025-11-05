@@ -10,3 +10,5 @@ matplotlib
 dask
 numba
 tqdm
+datatime
+pandas

@@ -5,6 +5,7 @@ import rasterio
 from rasterio.io import MemoryFile
 from rasterio.transform import from_origin
 import matplotlib.pyplot as plt
+import matplotlib.colors
 from matplotlib.colors import TwoSlopeNorm, LinearSegmentedColormap
 import streamlit as st
 import pandas as pd
@@ -45,24 +46,52 @@ def _da_to_2d(da):
 def plot_map(da, title="", cmap=None, vmin=None, vmax=None,
              fig_width=8, fig_height=6):
     """
-    修复版的栅格地图绘制函数 - 移除了 return_fig 参数
+    修复版的栅格地图绘制函数 - 处理各种数据范围
     """
     if cmap is None:
         cmap = create_custom_cmap()
 
     img = _da_to_2d(da)
 
-    # 自动确定显示范围
-    if vmin is None:
-        vmin = np.nanpercentile(img, 2)
-    if vmax is None:
-        vmax = np.nanpercentile(img, 98)
+    # 对于Mann-Kendall结果，使用固定的值范围
+    if "Mann-Kendall" in title or "MK" in title:
+        vmin = -1
+        vmax = 1
+        cmap = plt.cm.RdBu_r
+        bounds = [-1.5, -0.5, 0.5, 1.5]
+        norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
+    else:
+        # 自动确定显示范围，确保vmin < vmax
+        valid_data = img[~np.isnan(img)]
+        if len(valid_data) > 0:
+            if vmin is None:
+                vmin = np.nanpercentile(img, 2)
+            if vmax is None:
+                vmax = np.nanpercentile(img, 98)
+
+            # 确保vmin < vmax
+            if vmin >= vmax:
+                vmin = np.min(valid_data)
+                vmax = np.max(valid_data)
+                if vmin == vmax:  # 如果所有值都相同
+                    vmin = vmin - 0.1
+                    vmax = vmax + 0.1
+
+        norm = None
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
     # 处理包含负值的数据
-    if np.nanmin(img) < 0 and np.nanmax(img) > 0 and (vmin is None or vmin < 0):
-        norm = TwoSlopeNorm(vcenter=0, vmin=vmin, vmax=vmax)
+    if norm is None and len(valid_data) > 0 and np.nanmin(img) < 0 and np.nanmax(img) > 0:
+        try:
+            # 确保vmin < 0 < vmax
+            if vmin < 0 and vmax > 0:
+                norm = TwoSlopeNorm(vcenter=0, vmin=vmin, vmax=vmax)
+        except (ValueError, TypeError) as e:
+            # 如果归一化失败，使用普通归一化
+            norm = None
+
+    if norm is not None:
         im = ax.imshow(img, cmap=cmap, norm=norm, interpolation='nearest')
     else:
         im = ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax,
@@ -263,8 +292,8 @@ def plot_pixel_timeseries(stack, row=None, col=None, period=12):
 
 def dataarray_to_bytes_tif(da, nodata=-9999.0):
     """
-    改进的DataArray转GeoTIFF函数
-    更好地保持空间参考信息
+    完全重写的GeoTIFF生成函数
+    确保保持原始坐标系和空间参考信息
     """
     arr2d = _da_to_2d(da)
 
@@ -272,30 +301,86 @@ def dataarray_to_bytes_tif(da, nodata=-9999.0):
     arr2d = np.where(np.isnan(arr2d), nodata, arr2d).astype(np.float32)
 
     try:
-        # 尝试使用rioxarray的profile
-        if hasattr(da, 'rio') and hasattr(da.rio, 'crs') and da.rio.crs is not None:
-            profile = da.rio.profile.copy()
-            profile.update({
-                'dtype': rasterio.float32,
-                'count': 1,
-                'compress': 'lzw',
-                'nodata': nodata
-            })
-        else:
-            # 创建默认profile
+        # 从原始数据栈获取参考信息
+        if 'data_stack' in st.session_state and st.session_state.data_stack is not None:
+            ref_da = st.session_state.data_stack.isel(time=0)
+
+            # 获取CRS和变换信息
+            crs = None
+            transform = None
+
+            # 方法1: 使用rioxarray的属性
+            if hasattr(ref_da, 'rio') and ref_da.rio.crs is not None:
+                crs = ref_da.rio.crs
+                transform = ref_da.rio.transform()
+
+            # 方法2: 如果rioxarray不可用，尝试从坐标推断
+            if crs is None and hasattr(ref_da, 'x') and hasattr(ref_da, 'y'):
+                # 从坐标创建近似的变换
+                if len(ref_da.x) > 1 and len(ref_da.y) > 1:
+                    x_res = float(ref_da.x[1] - ref_da.x[0])
+                    y_res = float(ref_da.y[0] - ref_da.y[1])  # 注意y方向
+                    transform = from_origin(
+                        float(ref_da.x[0]) - x_res / 2,
+                        float(ref_da.y[0]) + y_res / 2,
+                        x_res,
+                        y_res
+                    )
+
+            # 创建profile
             profile = {
                 'driver': 'GTiff',
                 'dtype': rasterio.float32,
                 'count': 1,
                 'height': arr2d.shape[0],
                 'width': arr2d.shape[1],
-                'transform': from_origin(0, arr2d.shape[0], 1, 1),
-                'crs': None,
                 'compress': 'lzw',
                 'nodata': nodata
             }
 
-        # 写入内存文件
+            # 添加CRS和变换信息
+            if crs is not None:
+                profile['crs'] = crs
+            if transform is not None:
+                profile['transform'] = transform
+            else:
+                # 默认变换
+                profile['transform'] = from_origin(0, arr2d.shape[0], 1, 1)
+
+            # 写入内存文件
+            memfile = MemoryFile()
+            with memfile.open(**profile) as dst:
+                dst.write(arr2d, 1)
+
+            data = memfile.read()
+            memfile.close()
+            return data
+
+        else:
+            # 没有参考数据，创建默认TIFF
+            return create_simple_tif(arr2d, nodata)
+
+    except Exception as e:
+        st.error(f"生成GeoTIFF失败: {e}")
+        # 返回简单TIFF作为fallback
+        return create_simple_tif(arr2d, nodata)
+
+
+def create_simple_tif(arr2d, nodata=-9999.0):
+    """创建简单的TIFF文件（无坐标系）"""
+    try:
+        profile = {
+            'driver': 'GTiff',
+            'dtype': rasterio.float32,
+            'count': 1,
+            'height': arr2d.shape[0],
+            'width': arr2d.shape[1],
+            'transform': from_origin(0, arr2d.shape[0], 1, 1),
+            'crs': None,
+            'compress': 'lzw',
+            'nodata': nodata
+        }
+
         memfile = MemoryFile()
         with memfile.open(**profile) as dst:
             dst.write(arr2d, 1)
@@ -303,10 +388,8 @@ def dataarray_to_bytes_tif(da, nodata=-9999.0):
         data = memfile.read()
         memfile.close()
         return data
-
     except Exception as e:
-        st.error(f"生成GeoTIFF失败: {e}")
-        # 返回空字节作为fallback
+        st.error(f"创建简单TIFF失败: {e}")
         return b''
 
 

@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import ttkbootstrap as tb
+from PyQt5.QtGui.QIcon import themeName
 from ttkbootstrap.constants import *
 import tempfile
 from pathlib import Path
@@ -755,6 +756,7 @@ class RemoteSensingApp:
         self.root = tb.Window(
             title="时序遥感分析系统 V3.0 Pro @3S&ML",
             themename="cosmo"
+
         )
         # 移除size参数，添加最大化窗口
         self.root.state('zoomed')  # 在Windows系统上最大化窗口

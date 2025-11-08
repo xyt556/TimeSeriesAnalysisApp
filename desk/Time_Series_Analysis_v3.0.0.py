@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import ttkbootstrap as tb
-from PyQt5.QtGui.QIcon import themeName
+# from PyQt5.QtGui.QIcon import themeName
 from ttkbootstrap.constants import *
 import tempfile
 from pathlib import Path
